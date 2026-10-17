@@ -1,0 +1,130 @@
+digraph RideHailing {
+    rankdir=TB;
+    compound=true;
+    fontname="Helvetica";
+    nodesep=0.35;
+    ranksep=0.9;
+    node [shape=record, fontname="Helvetica", fontsize=10, style=filled, fillcolor="white"];
+    edge [fontname="Helvetica", fontsize=9, arrowhead=vee];
+
+    // ---------------- Client ----------------
+    subgraph cluster_client {
+        label="Client"; style=filled; fillcolor="#f3f3f3"; color="#888888";
+        ConsoleApp [label="{ConsoleApp (Client)|+main(args)\l-handleMenuChoice(menuChoice)\l}"];
+        RideRequest [label="{RideRequest|riderName: String\lpickupX/YInKilometers: double\ldropoffX/YInKilometers: double\lcityZoneName: String\lcardNumber: String\l}"];
+    }
+
+    // ---------------- Facade layer ----------------
+    subgraph cluster_facade {
+        label="Facade layer (package facade)"; style=filled; fillcolor="#fff4d6"; color="#c9a227";
+        RideBookingFacade [label="{RideBookingFacade (Facade 1)|+bookRide(rideRequest): RideOrder\l+simulateCrashAfterStepA(rideRequest): RideOrder\l+simulateCrashAfterStepB(rideRequest): RideOrder\l+rateCompletedRide(rideOrderId, numberOfStars)\l-runStepAReserveNearestFreeDriver(rideRequest)\l-runStepBAndUndoStepAIfItFails(rideOrder, rideRequest)\l-runStepBPriceRideAndIssueReceipt(rideOrder, distance, zone)\l-runStepCChargeCardAndFinishRide(rideOrder, card)\l}", fillcolor="#ffe9a8"];
+        RideAdminFacade [label="{RideAdminFacade (Facade 2)|+registerNewDriver(name, x, y)\l+describeAllDrivers()\l+describeAllRides()\l+cancelRideManually(rideOrderId)\l+finishTripAndMakeDriverFree(rideOrderId)\l+recoverUnfinishedRides(): int\l}", fillcolor="#ffe9a8"];
+        RideCompensator [label="{RideCompensator|+compensateRide(rideOrderId)\l-refundPaymentIfItWasCharged(paymentId)\l-voidReceiptIfItIsNotVoidedYet(receiptId)\l-makeDriverFreeIfHeIsNotFreeYet(driverId)\l}"];
+        RideOrder [label="{RideOrder|-rideOrderId, riderName, driverId\l-receiptId, paymentId\l-status: RideOrderStatus\l|+attachReceiptAndMoveToPendingC(receiptId)\l+attachPayment(paymentId)\l+markAsCompleted()\l+markAsCompensated()\l}"];
+        RideOrderStatus [label="{RideOrderStatus (enum)|PENDING_B\lPENDING_C\lCOMPLETED\lCOMPENSATED\l}"];
+        RideOrderRepository [label="{RideOrderRepository|+saveRideOrder(rideOrder)\l+findAllRideOrders()\l+findRideOrderById(id)\l}"];
+        InvalidRideRequestException [label="{InvalidRideRequestException}"];
+    }
+
+    // ---------------- Subsystem A ----------------
+    subgraph cluster_a {
+        label="Subsystem A: driver (reserve)"; style=filled; fillcolor="#e3f0ff"; color="#3b78c4";
+        DriverMatcher [label="{DriverMatcher (business logic)|+findNearestFreeDriver(allDrivers, pickupPoint)\l}"];
+        GpsRouter [label="{GpsRouter (business logic)|+calculateDistanceInKilometersBetween(startPoint, endPoint): double\l+calculateEstimatedTravelTimeInMinutes(distance): int\l}"];
+        Driver [label="{Driver (entity)|-driverId, driverName: String\l-currentLocation: CityMapPoint\l-currentStatus: DriverStatus\l|+reserveForRide()\l+startDrivingRide()\l+becomeFreeAgain()\l}"];
+        DriverStatus [label="{DriverStatus (enum)|FREE\lRESERVED\lBUSY\l}"];
+        DriverRepository [label="{DriverRepository (gateway)|+saveDriver(driver)\l+findAllDrivers()\l+findDriverById(id)\l}"];
+        CityMapPoint [label="{CityMapPoint|xInKilometers, yInKilometers\l|+calculateDistanceInKilometersTo(point)\l}"];
+        NoFreeDriverException [label="{NoFreeDriverException}"];
+    }
+
+    // ---------------- Subsystem B ----------------
+    subgraph cluster_b {
+        label="Subsystem B: pricing (process)"; style=filled; fillcolor="#e6f6e6"; color="#3c9a3c";
+        PricingEngine [label="{PricingEngine (business logic)|+calculatePrice(distanceInKilometers, cityZoneName)\l}"];
+        ReceiptGenerator [label="{ReceiptGenerator (business logic)|+generateReceipt(rideOrderId, riderName, amountToPay)\l}"];
+        Receipt [label="{Receipt (entity)|-receiptId, rideOrderId, riderName\l-amountToPay: double\l-status: ReceiptStatus\l|+markAsPaid()\l+markAsVoided()\l}"];
+        ReceiptStatus [label="{ReceiptStatus (enum)|ISSUED\lPAID\lVOIDED\l}"];
+        ReceiptRepository [label="{ReceiptRepository (gateway)|+saveReceipt(receipt)\l+findAllReceipts()\l+findReceiptById(id)\l}"];
+        PricingException [label="{PricingException}"];
+    }
+
+    // ---------------- Subsystem C ----------------
+    subgraph cluster_c {
+        label="Subsystem C: payment (finalize)"; style=filled; fillcolor="#fbe6f1"; color="#b03a80";
+        PaymentProcessor [label="{PaymentProcessor (business logic)|+chargeCard(rideOrderId, cardNumber, amountToCharge)\l}"];
+        RatingService [label="{RatingService|+rateDriver(paymentId, numberOfStars)\l}"];
+        Payment [label="{Payment (entity)|-paymentId, rideOrderId\l-cardLastFourDigits: String\l-amount: double\l-status: PaymentStatus\l-driverRatingInStars: int\l|+markAsCharged()\l+markAsDeclined()\l+markAsRefunded()\l}"];
+        PaymentStatus [label="{PaymentStatus (enum)|NEW\lCHARGED\lDECLINED\lREFUNDED\l}"];
+        PaymentRepository [label="{PaymentRepository (gateway)|+savePayment(payment)\l+findAllPayments()\l+findPaymentById(id)\l}"];
+        PaymentDeclinedException [label="{PaymentDeclinedException}"];
+    }
+
+    CsvFile [label="{CsvFile (package storage)|+readAllRowsFromFile()\l+saveOrReplaceRowById(row)\l}", fillcolor="#eeeeee"];
+
+    // ---------------- Client uses only the facades ----------------
+    ConsoleApp -> RideBookingFacade [label="uses"];
+    ConsoleApp -> RideAdminFacade [label="uses"];
+    ConsoleApp -> RideRequest [style=dashed, label="creates"];
+    RideBookingFacade -> RideRequest [style=dashed];
+    RideBookingFacade -> InvalidRideRequestException [style=dashed, label="throws"];
+
+    // ---------------- Facade 1 -> its components ----------------
+    RideBookingFacade -> DriverRepository [arrowhead=odiamond];
+    RideBookingFacade -> DriverMatcher [arrowhead=odiamond];
+    RideBookingFacade -> GpsRouter [arrowhead=odiamond];
+    RideBookingFacade -> PricingEngine [arrowhead=odiamond];
+    RideBookingFacade -> ReceiptGenerator [arrowhead=odiamond];
+    RideBookingFacade -> ReceiptRepository [arrowhead=odiamond];
+    RideBookingFacade -> PaymentProcessor [arrowhead=odiamond];
+    RideBookingFacade -> PaymentRepository [arrowhead=odiamond];
+    RideBookingFacade -> RatingService [arrowhead=odiamond];
+    RideBookingFacade -> RideOrderRepository [arrowhead=odiamond];
+    RideBookingFacade -> RideCompensator [arrowhead=odiamond];
+
+    // ---------------- Facade 2 ----------------
+    RideAdminFacade -> DriverRepository [arrowhead=odiamond];
+    RideAdminFacade -> ReceiptRepository [arrowhead=odiamond];
+    RideAdminFacade -> PaymentRepository [arrowhead=odiamond];
+    RideAdminFacade -> RideOrderRepository [arrowhead=odiamond];
+    RideAdminFacade -> RideCompensator [arrowhead=odiamond];
+
+    // ---------------- Compensator ----------------
+    RideCompensator -> DriverRepository [arrowhead=odiamond];
+    RideCompensator -> ReceiptRepository [arrowhead=odiamond];
+    RideCompensator -> PaymentRepository [arrowhead=odiamond];
+    RideCompensator -> RideOrderRepository [arrowhead=odiamond];
+
+    // ---------------- Inside the facade layer ----------------
+    RideOrderRepository -> RideOrder [style=dashed, label="stores"];
+    RideOrder -> RideOrderStatus;
+
+    // ---------------- Inside A ----------------
+    DriverMatcher -> Driver [style=dashed];
+    DriverMatcher -> NoFreeDriverException [style=dashed, label="throws"];
+    GpsRouter -> CityMapPoint [style=dashed];
+    DriverRepository -> Driver [style=dashed, label="stores"];
+    Driver -> DriverStatus;
+    Driver -> CityMapPoint;
+
+    // ---------------- Inside B ----------------
+    PricingEngine -> PricingException [style=dashed, label="throws"];
+    ReceiptGenerator -> Receipt [style=dashed, label="creates"];
+    ReceiptRepository -> Receipt [style=dashed, label="stores"];
+    Receipt -> ReceiptStatus;
+
+    // ---------------- Inside C ----------------
+    PaymentProcessor -> Payment [style=dashed, label="creates"];
+    PaymentRepository -> Payment [style=dashed, label="stores"];
+    RatingService -> PaymentRepository [arrowhead=odiamond];
+    Payment -> PaymentStatus;
+
+    // ---------------- Persistence ----------------
+    DriverRepository -> CsvFile [style=dotted];
+    ReceiptRepository -> CsvFile [style=dotted];
+    PaymentRepository -> CsvFile [style=dotted];
+    RideOrderRepository -> CsvFile [style=dotted];
+
+    // ---------------- Exceptions thrown through the facade ----------------
+    RideBookingFacade -> PaymentDeclinedException [style=dashed, label="throws"];
+}
