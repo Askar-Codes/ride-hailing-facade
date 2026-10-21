@@ -118,3 +118,62 @@ meaningless for an Adapter. The subsystems stay usable directly, and they do not
 * UML class diagram: `docs/class-diagram.png` / `docs/class-diagram.svg` (source `docs/class-diagram.dot`).
 
 ![class diagram](docs/class-diagram.png)
+
+## 6. Assignment 5: Strategy pattern (pricing and driver matching)
+
+Two operations of the ride-hailing domain can be done in several ways, so each one is a **Strategy family**. All new code is in
+`ridehailing.strategy` (the demo is `ridehailing.app.StrategyDemo`). The facade code of Assignment 4 is reused, not changed:
+`StandardPricingStrategy` calls the existing `PricingEngine`; `Driver` and `CityMapPoint` come from the driver subsystem.
+
+| Family | Interface | Strategies | Context | Selector (the only place with `if`) |
+|--------|-----------|------------|---------|--------------------------------------|
+| Pricing | `PricingStrategy` | `StandardPricingStrategy`, `SurgePricingStrategy`, `PremiumPricingStrategy` | `PricingContext` | `PricingStrategySelector`: premium taxi, then high demand, otherwise standard |
+| Driver matching | `DriverMatchingStrategy` | `NearestDriverStrategy`, `HighestRatedDriverStrategy`, `LongestIdleDriverStrategy` | `DriverMatchingContext` | `DriverMatchingStrategySelector`: premium taxi, then night time, otherwise nearest |
+
+Outside data is hidden behind our own interfaces (Clean Code ch. 10, like `StockExchange` on slide 43): `DemandSource` (how busy the city is) and
+`DriverStatsSource` (rating, idle minutes). Simulated implementations are used by the demo, fake implementations by the tests.
+
+### Classes and their responsibilities
+
+| Class | Responsibility |
+|-------|----------------|
+| `TaxiClass` | Names the two classes of car a rider can order. |
+| `PriceInput` | Carries distance, zone name, taxi class of one ride into the pricing algorithms. |
+| `PricingStrategy` | Declares the single price calculation every tariff must offer. |
+| `StandardPricingStrategy` | Calculates the price from the tariff table of the zone. |
+| `SurgePricingStrategy` | Multiplies the standard price by the demand reported by the demand source. |
+| `PremiumPricingStrategy` | Adds a comfort fee to one flat rate per kilometre. |
+| `PricingContext` | Keeps the current pricing strategy, lets it be replaced, asks it for the price. |
+| `PricingStrategySelector` | Chooses the pricing strategy that matches the taxi class with the current demand. |
+| `DemandSource` | Hides where the current city demand comes from. |
+| `SimulatedDemandSource` | Reports double demand during morning rush hours with evening rush hours. |
+| `DriverMatchingStrategy` | Declares the single driver choice every matching algorithm must offer. |
+| `FreeDriversFilter` | Keeps free drivers, throws the same exception for every strategy when none exists. |
+| `NearestDriverStrategy` | Chooses the free driver closest to the pickup point. |
+| `HighestRatedDriverStrategy` | Chooses the free driver with the best average rating. |
+| `LongestIdleDriverStrategy` | Chooses the free driver who waited longest since his last ride. |
+| `DriverMatchingContext` | Keeps the current matching strategy, lets it be replaced, asks it for the driver. |
+| `DriverMatchingStrategySelector` | Chooses the matching strategy that fits the taxi class with the time of day. |
+| `DriverStatsSource` | Hides where driver ratings with idle times come from. |
+| `SimulatedDriverStatsSource` | Produces repeatable ratings with idle times from the driver id. |
+| `StrategyDemo` | Prints all strategies, manual against automatic choice, switching at runtime. |
+
+### Why Strategy and not State or Template Method
+
+**Not State.** In State the object changes its own behaviour because its internal state changes, and the states usually decide
+the next state themselves (like `DriverStatus`: FREE -> RESERVED -> BUSY). Here the price strategies know nothing about each other and never
+switch one another. The *outside* code (the selector, or the demo) picks the algorithm from the situation, and the same
+ride can be priced by any of the three at any moment. The algorithms are interchangeable; states are a sequence.
+
+**Not Template Method.** Template Method fixes the skeleton of an algorithm in a base class, subclasses fill in some steps, and
+the choice is made at compile time by inheritance. Our strategies share no skeleton: the standard tariff uses a zone table, surge uses a
+live multiplier, premium uses a flat rate. Each one is a whole algorithm behind one interface, held by composition, so it can be replaced
+while the program runs (`setStrategy`). A new algorithm is a new class; no existing class changes (Open/Closed).
+
+### Refactoring with Git history (pricing family)
+
+* **Before**: all tariffs in one class with `switch`: [commit afb3e8a](https://github.com/Askar-Codes/ride-hailing-facade/commit/afb3e8a)
+* **After**: Strategy, contexts, selectors, demo: [commit f695114](https://github.com/Askar-Codes/ride-hailing-facade/commit/f695114)
+
+`PricingBehaviourTest` is the same file in both commits and passes in both (`PricingTestHelper` only changes how the algorithm is built).
+Run the demo with `ridehailing.app.StrategyDemo.main()`.
